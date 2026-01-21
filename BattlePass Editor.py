@@ -24,6 +24,10 @@ FONT = ("Segoe UI", 10)
 FONT_B = ("Segoe UI", 10, "bold")
 FONT_H = ("Segoe UI", 12, "bold")
 
+MAX_WEEKS = 4
+MAX_REWARDS = 50
+MAX_TIERS = 50
+
 
 # =========================
 # YAML HELPERS
@@ -109,6 +113,14 @@ def kv_to_lines(m):
     for k, v in (m or {}).items():
         out.append(f"{k}={v}")
     return out
+
+
+def clamp_int(raw: str, minimum: int, maximum: int, fallback: int) -> int:
+    try:
+        value = int(str(raw).strip())
+    except Exception:
+        return fallback
+    return max(minimum, min(maximum, value))
 
 
 # =========================
@@ -295,21 +307,24 @@ def reward_emoji(reward: dict) -> str:
         items = ensure_dict(r.get("items", {}))
         it = ensure_dict(items.get("1", {}))
         mat = str(it.get("material", "")).lower()
+        glow = bool(it.get("glow", False))
         if "sword" in mat or "axe" in mat:
-            return "🗡️"
-        if "pickaxe" in mat or "shovel" in mat or "hoe" in mat:
-            return "⛏️"
-        if "chestplate" in mat or "helmet" in mat or "leggings" in mat or "boots" in mat:
-            return "🛡️"
-        if "elytra" in mat:
-            return "🪽"
-        if "totem" in mat:
-            return "🗿"
-        if "apple" in mat:
-            return "🍎"
-        if "pearl" in mat:
-            return "🧿"
-        return "🎁"
+            emoji = "🗡️"
+        elif "pickaxe" in mat or "shovel" in mat or "hoe" in mat:
+            emoji = "⛏️"
+        elif "chestplate" in mat or "helmet" in mat or "leggings" in mat or "boots" in mat:
+            emoji = "🛡️"
+        elif "elytra" in mat:
+            emoji = "🪽"
+        elif "totem" in mat:
+            emoji = "🗿"
+        elif "apple" in mat:
+            emoji = "🍎"
+        elif "pearl" in mat:
+            emoji = "🧿"
+        else:
+            emoji = "🎁"
+        return f"✨{emoji}" if glow else emoji
     return "🎁"
 
 
@@ -409,12 +424,19 @@ class BattlePassStudio(tk.Tk):
         self.mode_var = tk.StringVar(value="battlepass")
         self.track_var = tk.StringVar(value="free")
         self.tier_original_id = ""
+        self.drag_data = {"item": None, "tv": None}
 
         self.path_free = tk.StringVar(value=self._autodetect_in_dir("free.yml"))
         self.path_premium = tk.StringVar(value=self._autodetect_in_dir("premium.yml"))
         self.path_rewards = tk.StringVar(value=self._autodetect_in_dir("rewards.yml"))
         self.path_quests = tk.StringVar(value=self._autodetect_any_quest_file())
         self.path_week_pool = tk.StringVar(value=self._autodetect_in_dir("week-pool.yml"))
+
+        self.random_tiers_var = tk.StringVar(value="20")
+        self.random_rewards_var = tk.StringVar(value="30")
+        self.random_weeks_var = tk.StringVar(value=str(MAX_WEEKS))
+        self.reward_group_var = tk.StringVar(value="")
+        self.reward_group_filter_var = tk.StringVar(value="All")
 
         self._build_ui()
         self._apply_window_constraints()
@@ -564,8 +586,28 @@ class BattlePassStudio(tk.Tk):
             row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 10)
         )
 
+        rand = ttk.Labelframe(self.left, text="Random BattlePass")
+        rand.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 12))
+        rand.grid_columnconfigure(1, weight=1)
+
+        ttk.Label(rand, text=f"Tiers (max {MAX_TIERS})").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 2))
+        ttk.Entry(rand, textvariable=self.random_tiers_var, width=10).grid(row=0, column=1, sticky="ew", padx=(0, 10), pady=(10, 2))
+
+        ttk.Label(rand, text=f"Rewards (max {MAX_REWARDS})").grid(row=1, column=0, sticky="w", padx=10, pady=(8, 2))
+        ttk.Entry(rand, textvariable=self.random_rewards_var, width=10).grid(row=1, column=1, sticky="ew", padx=(0, 10), pady=(8, 2))
+
+        ttk.Label(rand, text=f"Weeks (max {MAX_WEEKS})").grid(row=2, column=0, sticky="w", padx=10, pady=(8, 2))
+        ttk.Entry(rand, textvariable=self.random_weeks_var, width=10).grid(row=2, column=1, sticky="ew", padx=(0, 10), pady=(8, 2))
+
+        ttk.Button(rand, text="Random BattlePass", command=self._random_battlepass_from_inputs).grid(
+            row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 4)
+        )
+        ttk.Button(rand, text="Advanced Randomize All", command=self._randomize_everything).grid(
+            row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 10)
+        )
+
         self.dirty_var = tk.StringVar(value="Unsaved: none")
-        ttk.Label(self.left, textvariable=self.dirty_var, foreground=MUTED).grid(row=3, column=0, sticky="w", padx=12, pady=(0, 10))
+        ttk.Label(self.left, textvariable=self.dirty_var, foreground=MUTED).grid(row=4, column=0, sticky="w", padx=12, pady=(0, 10))
 
     def _file_row(self, parent, r, label, var, pick_cmd):
         parent.grid_columnconfigure(0, weight=1)
@@ -627,6 +669,12 @@ class BattlePassStudio(tk.Tk):
         self.dirty[key] = bool(dirty)
         keys = [k for k, v in self.dirty.items() if v]
         self.dirty_var.set("Unsaved: " + (", ".join(keys) if keys else "none"))
+
+    def _mark_tiers_dirty(self):
+        tr = self.track_var.get().strip().lower()
+        if tr not in ("free", "premium"):
+            tr = "free"
+        self.mark_dirty(tr, True)
 
     # -------------------------
     # FILE PICK
@@ -717,6 +765,77 @@ class BattlePassStudio(tk.Tk):
         else:
             self.set_status("Nothing to generate.")
 
+    def _random_battlepass_from_inputs(self):
+        tiers = clamp_int(self.random_tiers_var.get(), 1, MAX_TIERS, 20)
+        rewards = clamp_int(self.random_rewards_var.get(), 1, MAX_REWARDS, 30)
+        weeks = clamp_int(self.random_weeks_var.get(), 1, MAX_WEEKS, MAX_WEEKS)
+        self.random_tiers_var.set(str(tiers))
+        self.random_rewards_var.set(str(rewards))
+        self.random_weeks_var.set(str(weeks))
+        self._generate_random_battlepass(tiers, rewards, weeks)
+
+    def _randomize_everything(self):
+        tiers = random.randint(1, MAX_TIERS)
+        rewards = random.randint(1, MAX_REWARDS)
+        weeks = random.randint(1, MAX_WEEKS)
+        self.random_tiers_var.set(str(tiers))
+        self.random_rewards_var.set(str(rewards))
+        self.random_weeks_var.set(str(weeks))
+        self._generate_random_battlepass(tiers, rewards, weeks)
+
+    def _generate_random_battlepass(self, tiers_count: int, rewards_count: int, weeks_count: int):
+        rewards = {}
+        group_pool = ["Combat", "Mining", "Farming", "Utility", "Exploration"]
+        for i in range(1, rewards_count + 1):
+            reward = gen_random_reward()
+            if random.random() < 0.6:
+                reward["group"] = random.choice(group_pool)
+            rewards[str(i)] = reward
+
+        reward_ids = list(rewards.keys())
+        free_tiers = {}
+        premium_tiers = {}
+        required_points = 0
+        for idx in range(1, tiers_count + 1):
+            required_points += random.randint(25, 90)
+            reward_count = random.randint(1, min(3, len(reward_ids))) if reward_ids else 0
+            tier_rewards = random.sample(reward_ids, reward_count) if reward_count else []
+            free_tiers[str(idx)] = {"required-points": required_points, "rewards": tier_rewards}
+            premium_tiers[str(idx)] = {"required-points": required_points, "rewards": random.sample(reward_ids, reward_count) if reward_count else []}
+
+        quest_count = min(weeks_count * 10, 50)
+        quests = {}
+        for i in range(1, quest_count + 1):
+            quests[str(i)] = gen_random_quest()
+        quest_root = {"quests": quests}
+
+        week_pool = {"weeks": {}}
+        if weeks_count > 0:
+            quest_ids = list(quests.keys())
+            chunk = max(1, int(len(quest_ids) / weeks_count)) if quest_ids else 1
+            idx = 0
+            for w in range(1, weeks_count + 1):
+                week_pool["weeks"][str(w)] = quest_ids[idx : idx + chunk]
+                idx += chunk
+
+        self.state["rewards"] = rewards
+        self.state["free"] = {"tiers": free_tiers}
+        self.state["premium"] = {"tiers": premium_tiers}
+        self.state["quests"] = quest_root
+        self.state["week_pool"] = week_pool
+
+        self.mark_dirty("rewards", True)
+        self.mark_dirty("free", True)
+        self.mark_dirty("premium", True)
+        self.mark_dirty("quests", True)
+        self.mark_dirty("week_pool", True)
+
+        self._reward_refresh_list()
+        self._tiers_refresh_list()
+        self._quests_refresh_list()
+        self._render_preview()
+        self.set_status("Random BattlePass generated.")
+
     # =========================
     # REWARDS TAB
     # =========================
@@ -727,21 +846,33 @@ class BattlePassStudio(tk.Tk):
 
         left = ttk.Labelframe(self.tab_rewards, text="Rewards List")
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        left.grid_rowconfigure(0, weight=1)
+        left.grid_rowconfigure(1, weight=1)
         left.grid_columnconfigure(0, weight=1)
 
-        self.tv_rewards = ttk.Treeview(left, columns=("id", "name", "type"), show="headings", height=18)
+        filter_row = ttk.Frame(left)
+        filter_row.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
+        filter_row.grid_columnconfigure(1, weight=1)
+        ttk.Label(filter_row, text="Group").grid(row=0, column=0, sticky="w", padx=(0, 6))
+        self.cb_reward_group = ttk.Combobox(filter_row, textvariable=self.reward_group_filter_var, state="readonly")
+        self.cb_reward_group.grid(row=0, column=1, sticky="ew")
+        self.cb_reward_group.bind("<<ComboboxSelected>>", lambda _e: self._refresh_rewards_list())
+
+        self.tv_rewards = ttk.Treeview(left, columns=("id", "name", "type", "group"), show="headings", height=18)
         self.tv_rewards.heading("id", text="ID")
         self.tv_rewards.heading("name", text="NAME")
         self.tv_rewards.heading("type", text="TYPE")
+        self.tv_rewards.heading("group", text="GROUP")
         self.tv_rewards.column("id", width=60, stretch=False)
-        self.tv_rewards.column("name", width=220, stretch=True)
-        self.tv_rewards.column("type", width=110, stretch=False)
-        self.tv_rewards.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        self.tv_rewards.column("name", width=200, stretch=True)
+        self.tv_rewards.column("type", width=90, stretch=False)
+        self.tv_rewards.column("group", width=110, stretch=False)
+        self.tv_rewards.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
         self.tv_rewards.bind("<<TreeviewSelect>>", self._on_reward_select)
+        self.tv_rewards.bind("<ButtonPress-1>", self._on_rewards_drag_start)
+        self.tv_rewards.bind("<ButtonRelease-1>", self._on_rewards_drag_drop)
 
         btn = ttk.Frame(left)
-        btn.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
+        btn.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
         for i in range(5):
             btn.grid_columnconfigure(i, weight=1)
 
@@ -770,21 +901,24 @@ class BattlePassStudio(tk.Tk):
         ttk.Label(sc.inner, text="Name").grid(row=1, column=0, sticky="w", pady=2)
         ttk.Entry(sc.inner, textvariable=self.reward_name_var).grid(row=1, column=1, sticky="ew", pady=2)
 
-        ttk.Label(sc.inner, text="Type").grid(row=2, column=0, sticky="w", pady=2)
+        ttk.Label(sc.inner, text="Group").grid(row=2, column=0, sticky="w", pady=2)
+        ttk.Entry(sc.inner, textvariable=self.reward_group_var).grid(row=2, column=1, sticky="ew", pady=2)
+
+        ttk.Label(sc.inner, text="Type").grid(row=3, column=0, sticky="w", pady=2)
         cb = ttk.Combobox(sc.inner, textvariable=self.reward_type_var, values=["item", "command", "xp"], state="readonly")
-        cb.grid(row=2, column=1, sticky="ew", pady=2)
+        cb.grid(row=3, column=1, sticky="ew", pady=2)
         cb.bind("<<ComboboxSelected>>", lambda _e: self._reward_switch_type())
 
-        ttk.Label(sc.inner, text="Lore Addon (one per line)").grid(row=3, column=0, sticky="nw", pady=(10, 2))
+        ttk.Label(sc.inner, text="Lore Addon (one per line)").grid(row=4, column=0, sticky="nw", pady=(10, 2))
         self.txt_reward_loreaddon = tk.Text(sc.inner, height=4, wrap="word")
-        self.txt_reward_loreaddon.grid(row=3, column=1, sticky="ew", pady=(10, 2))
+        self.txt_reward_loreaddon.grid(row=4, column=1, sticky="ew", pady=(10, 2))
 
-        ttk.Label(sc.inner, text="Variables (key=value per line)").grid(row=4, column=0, sticky="nw", pady=(10, 2))
+        ttk.Label(sc.inner, text="Variables (key=value per line)").grid(row=5, column=0, sticky="nw", pady=(10, 2))
         self.txt_reward_vars = tk.Text(sc.inner, height=4, wrap="word")
-        self.txt_reward_vars.grid(row=4, column=1, sticky="ew", pady=(10, 2))
+        self.txt_reward_vars.grid(row=5, column=1, sticky="ew", pady=(10, 2))
 
         self.reward_type_stack = ttk.Frame(sc.inner)
-        self.reward_type_stack.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 2))
+        self.reward_type_stack.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(10, 2))
         self.reward_type_stack.grid_columnconfigure(0, weight=1)
 
         self.fr_cmd = ttk.Labelframe(self.reward_type_stack, text="Commands (one per line)")
@@ -820,12 +954,12 @@ class BattlePassStudio(tk.Tk):
         self.txt_item_lore = tk.Text(self.fr_item, height=6, wrap="word")
         self.txt_item_lore.grid(row=2, column=0, sticky="ew", padx=10, pady=(2, 10))
 
-        ttk.Label(sc.inner, text="Advanced YAML (optional, overrides editor when applied)").grid(row=6, column=0, sticky="nw", pady=(10, 2))
+        ttk.Label(sc.inner, text="Advanced YAML (optional, overrides editor when applied)").grid(row=7, column=0, sticky="nw", pady=(10, 2))
         self.txt_reward_yaml = tk.Text(sc.inner, height=10, wrap="word")
-        self.txt_reward_yaml.grid(row=6, column=1, sticky="ew", pady=(10, 2))
+        self.txt_reward_yaml.grid(row=7, column=1, sticky="ew", pady=(10, 2))
 
         adv_btn = ttk.Frame(sc.inner)
-        adv_btn.grid(row=7, column=1, sticky="e", pady=(2, 8))
+        adv_btn.grid(row=8, column=1, sticky="e", pady=(2, 8))
         ttk.Button(adv_btn, text="Apply YAML", command=self._reward_apply_yaml).grid(row=0, column=0, padx=(0, 6))
         ttk.Button(adv_btn, text="Revert", command=self._reward_revert).grid(row=0, column=1)
 
@@ -834,13 +968,33 @@ class BattlePassStudio(tk.Tk):
     def _rewards_dict(self):
         return ensure_dict(self.state.get("rewards", {}))
 
+    def _refresh_reward_group_filter(self, rewards=None):
+        rewards = rewards if rewards is not None else self._rewards_dict()
+        groups = sorted({str(ensure_dict(r).get("group", "")).strip() for r in rewards.values() if str(ensure_dict(r).get("group", "")).strip()})
+        values = ["All"] + groups
+        if hasattr(self, "cb_reward_group"):
+            self.cb_reward_group["values"] = values
+        current = (self.reward_group_filter_var.get() or "All").strip()
+        if current not in values:
+            self.reward_group_filter_var.set("All")
+
     def _refresh_rewards_list(self):
         self.tv_rewards.delete(*self.tv_rewards.get_children())
         rewards = self._rewards_dict()
+        self._refresh_reward_group_filter(rewards)
+        filter_group = (self.reward_group_filter_var.get() or "All").strip()
         keys = sorted(rewards.keys(), key=numeric_sort_key)
         for rid in keys:
             r = ensure_dict(rewards.get(rid, {}))
-            self.tv_rewards.insert("", "end", iid=str(rid), values=(str(rid), str(r.get("name", "")), str(r.get("type", ""))))
+            group = str(r.get("group", "")).strip()
+            if filter_group != "All" and group != filter_group:
+                continue
+            self.tv_rewards.insert(
+                "",
+                "end",
+                iid=str(rid),
+                values=(str(rid), str(r.get("name", "")), str(r.get("type", "")), group),
+            )
 
     def _on_reward_select(self, _e=None):
         rid = self._tv_selected(self.tv_rewards)
@@ -852,6 +1006,7 @@ class BattlePassStudio(tk.Tk):
     def _reward_load_editor(self, rid: str, r: dict):
         self.reward_id_var.set(rid)
         self.reward_name_var.set(str(r.get("name", "")))
+        self.reward_group_var.set(str(r.get("group", "")))
         reward_type = str(r.get("type", "item")).lower() or "item"
         if reward_type not in {"item", "command", "xp"}:
             reward_type = "command"
@@ -874,6 +1029,9 @@ class BattlePassStudio(tk.Tk):
             self._set_text(self.txt_item_lore, join_lines(ensure_list(it.get("lore", []))))
 
         self._set_text(self.txt_reward_yaml, yaml.safe_dump(r, sort_keys=False))
+
+    def _reward_load_into_editor(self, rid: str, r: dict):
+        self._reward_load_editor(rid, r)
 
     def _reward_switch_type(self):
         t = self.reward_type_var.get().strip().lower()
@@ -1044,6 +1202,11 @@ class BattlePassStudio(tk.Tk):
 
         r["name"] = self.reward_name_var.get().strip() or "Reward"
         r["type"] = self.reward_type_var.get().strip().lower() or "item"
+        group = self.reward_group_var.get().strip()
+        if group:
+            r["group"] = group
+        else:
+            r.pop("group", None)
 
         r["lore-addon"] = split_lines(self._get_text(self.txt_reward_loreaddon))
 
@@ -1191,6 +1354,8 @@ class BattlePassStudio(tk.Tk):
         self.tv_tiers.column("rewards", width=260, stretch=True)
         self.tv_tiers.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
         self.tv_tiers.bind("<<TreeviewSelect>>", self._on_tier_select)
+        self.tv_tiers.bind("<ButtonPress-1>", self._on_tiers_drag_start)
+        self.tv_tiers.bind("<ButtonRelease-1>", self._on_tiers_drag_drop)
 
         btnrow = ttk.Frame(left)
         btnrow.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 8))
@@ -1419,9 +1584,72 @@ class BattlePassStudio(tk.Tk):
     def _reward_refresh_list(self):
         self.tv_rewards.delete(*self.tv_rewards.get_children())
         rewards = ensure_dict(self.state.get("rewards", {}))
+        self._refresh_reward_group_filter(rewards)
+        filter_group = (self.reward_group_filter_var.get() or "All").strip()
         for rid in sorted(rewards.keys(), key=numeric_sort_key):
             r = ensure_dict(rewards.get(rid, {}))
-            self.tv_rewards.insert("", "end", iid=str(rid), values=(str(rid), str(r.get("name", "")), str(r.get("type", ""))))
+            group = str(r.get("group", "")).strip()
+            if filter_group != "All" and group != filter_group:
+                continue
+            self.tv_rewards.insert(
+                "",
+                "end",
+                iid=str(rid),
+                values=(str(rid), str(r.get("name", "")), str(r.get("type", "")), group),
+            )
+
+    def _on_rewards_drag_start(self, event):
+        if (self.reward_group_filter_var.get() or "All").strip() != "All":
+            return
+        if not hasattr(self, "tv_rewards"):
+            return
+        item = self.tv_rewards.identify_row(event.y)
+        if item:
+            self.drag_data = {"item": item, "tv": "rewards"}
+
+    def _on_rewards_drag_drop(self, event):
+        if self.drag_data.get("tv") != "rewards":
+            return
+        if (self.reward_group_filter_var.get() or "All").strip() != "All":
+            self.drag_data = {"item": None, "tv": None}
+            return
+        item = self.drag_data.get("item")
+        if not item:
+            return
+        target = self.tv_rewards.identify_row(event.y)
+        if target and target != item:
+            idx = self.tv_rewards.index(target)
+            self.tv_rewards.move(item, "", idx)
+            self._reorder_rewards_from_treeview()
+        self.drag_data = {"item": None, "tv": None}
+
+    def _reorder_rewards_from_treeview(self):
+        order = list(self.tv_rewards.get_children())
+        if not order:
+            return
+        rewards = ensure_dict(self.state.get("rewards", {}))
+        mapping = {}
+        new_rewards = {}
+        for new_idx, old_id in enumerate(order, start=1):
+            new_id = str(new_idx)
+            mapping[str(old_id)] = new_id
+            new_rewards[new_id] = ensure_dict(rewards.get(str(old_id), {}))
+        for track in ("free", "premium"):
+            track_data = ensure_dict(self.state.get(track, {}))
+            tiers = ensure_dict(track_data.get("tiers", {}))
+            for tid, tier in tiers.items():
+                t = ensure_dict(tier)
+                t["rewards"] = [mapping.get(str(r), str(r)) for r in ensure_list(t.get("rewards", []))]
+                tiers[tid] = t
+            track_data["tiers"] = tiers
+            self.state[track] = track_data
+        self.state["rewards"] = new_rewards
+        self.mark_dirty("rewards", True)
+        self.mark_dirty("free", True)
+        self.mark_dirty("premium", True)
+        self._reward_refresh_list()
+        self._tiers_refresh_list()
+        self._render_preview_battlepass()
 
     # -------------------------
     # Tiers Logic
@@ -1447,6 +1675,50 @@ class BattlePassStudio(tk.Tk):
             rewards = ensure_list(t.get("rewards", []))
             rtxt = ", ".join([str(x) for x in rewards])
             self.tv_tiers.insert("", "end", iid=str(tid), values=(str(tid), str(req), rtxt))
+
+    def _on_tiers_drag_start(self, event):
+        if not hasattr(self, "tv_tiers"):
+            return
+        item = self.tv_tiers.identify_row(event.y)
+        if item:
+            self.drag_data = {"item": item, "tv": "tiers"}
+
+    def _on_tiers_drag_drop(self, event):
+        if self.drag_data.get("tv") != "tiers":
+            return
+        item = self.drag_data.get("item")
+        if not item:
+            return
+        target = self.tv_tiers.identify_row(event.y)
+        if target and target != item:
+            idx = self.tv_tiers.index(target)
+            self.tv_tiers.move(item, "", idx)
+            self._reorder_tiers_from_treeview()
+        self.drag_data = {"item": None, "tv": None}
+
+    def _reorder_tiers_from_treeview(self):
+        order = list(self.tv_tiers.get_children())
+        if not order:
+            return
+        tr = self.track_var.get().strip().lower()
+        if tr not in ("free", "premium"):
+            tr = "free"
+        track_data = ensure_dict(self.state.get(tr, {}))
+        tiers = ensure_dict(track_data.get("tiers", {}))
+        mapping = {}
+        new_tiers = {}
+        for new_idx, old_id in enumerate(order, start=1):
+            new_id = str(new_idx)
+            mapping[str(old_id)] = new_id
+            new_tiers[new_id] = ensure_dict(tiers.get(str(old_id), {}))
+        track_data["tiers"] = new_tiers
+        self.state[tr] = track_data
+        self.mark_dirty(tr, True)
+        self._tiers_refresh_list()
+        selected_new = mapping.get(str(self.tier_original_id)) or mapping.get(str(self._tv_selected_iid(self.tv_tiers)))
+        if selected_new:
+            self._tiers_select(selected_new)
+        self._render_preview_battlepass()
 
     def _on_tier_select(self, _e=None):
         tid = self._tv_selected_iid(self.tv_tiers)
@@ -1912,6 +2184,8 @@ class BattlePassStudio(tk.Tk):
         c.create_text(pad_x, 96, text="FREE", anchor="w", fill=FREE_COL, font=FONT_B)
 
         for tid in all_ids:
+            p_exists = tid in prem_tiers
+            f_exists = tid in free_tiers
             p = ensure_dict(prem_tiers.get(tid, {}))
             f = ensure_dict(free_tiers.get(tid, {}))
 
@@ -1921,37 +2195,38 @@ class BattlePassStudio(tk.Tk):
             p_em = "".join([reward_emoji(ensure_dict(rewards.get(rid, {}))) for rid in pid_list]) or "—"
             f_em = "".join([reward_emoji(ensure_dict(rewards.get(rid, {}))) for rid in fid_list]) or "—"
 
-            pr = c.create_rectangle(x, y_p, x + tile, y_p + tile, fill=PREM_COL, outline="")
-            fr = c.create_rectangle(x, y_f, x + tile, y_f + tile, fill=FREE_COL, outline="")
-
-            pt = c.create_text(x + tile / 2, y_p + tile / 2, text=p_em, font=("Segoe UI", 16))
-            ft = c.create_text(x + tile / 2, y_f + tile / 2, text=f_em, font=("Segoe UI", 16))
-
-            c.create_text(x + tile / 2, y_f + tile + 16, text=str(tid), fill=MUTED, font=FONT)
-
-            p_names = []
-            for rid in pid_list:
+            def _format_reward_name(rid):
                 rr = ensure_dict(rewards.get(rid, {}))
-                p_names.append(str(rr.get("name", f"Reward {rid}")))
-            f_names = []
-            for rid in fid_list:
-                rr = ensure_dict(rewards.get(rid, {}))
-                f_names.append(str(rr.get("name", f"Reward {rid}")))
+                emoji = reward_emoji(rr)
+                name = str(rr.get("name", f"Reward {rid}"))
+                return f"{emoji} {name}"
 
-            p_tip = f"Tier {tid}\nPremium\n\n" + ("\n".join(p_names) if p_names else "No rewards")
-            f_tip = f"Tier {tid}\nFree\n\n" + ("\n".join(f_names) if f_names else "No rewards")
+            tier_drawn = False
+            if p_exists:
+                pr = c.create_rectangle(x, y_p, x + tile, y_p + tile, fill=PREM_COL, outline="")
+                pt = c.create_text(x + tile / 2, y_p + tile / 2, text=p_em, font=("Segoe UI", 16))
+                p_names = [_format_reward_name(rid) for rid in pid_list]
+                p_tip = f"Tier {tid}\nPremium\n\n" + ("\n".join(p_names) if p_names else "No rewards")
+                for item in (pr, pt):
+                    c.tag_bind(item, "<Enter>", lambda e, t=p_tip: self.tooltip.show(t, e.x_root, e.y_root))
+                    c.tag_bind(item, "<Leave>", lambda _e: self.tooltip.hide())
+                    c.tag_bind(item, "<Button-1>", lambda _e, tr="premium", tid=tid: self._select_tier_from_preview(tr, tid))
+                tier_drawn = True
 
-            for item in (pr, pt):
-                c.tag_bind(item, "<Enter>", lambda e, t=p_tip: self.tooltip.show(t, e.x_root, e.y_root))
-                c.tag_bind(item, "<Leave>", lambda _e: self.tooltip.hide())
-                c.tag_bind(item, "<Button-1>", lambda _e, tr="premium", tid=tid: self._select_tier_from_preview(tr, tid))
+            if f_exists:
+                fr = c.create_rectangle(x, y_f, x + tile, y_f + tile, fill=FREE_COL, outline="")
+                ft = c.create_text(x + tile / 2, y_f + tile / 2, text=f_em, font=("Segoe UI", 16))
+                f_names = [_format_reward_name(rid) for rid in fid_list]
+                f_tip = f"Tier {tid}\nFree\n\n" + ("\n".join(f_names) if f_names else "No rewards")
+                for item in (fr, ft):
+                    c.tag_bind(item, "<Enter>", lambda e, t=f_tip: self.tooltip.show(t, e.x_root, e.y_root))
+                    c.tag_bind(item, "<Leave>", lambda _e: self.tooltip.hide())
+                    c.tag_bind(item, "<Button-1>", lambda _e, tr="free", tid=tid: self._select_tier_from_preview(tr, tid))
+                tier_drawn = True
 
-            for item in (fr, ft):
-                c.tag_bind(item, "<Enter>", lambda e, t=f_tip: self.tooltip.show(t, e.x_root, e.y_root))
-                c.tag_bind(item, "<Leave>", lambda _e: self.tooltip.hide())
-                c.tag_bind(item, "<Button-1>", lambda _e, tr="free", tid=tid: self._select_tier_from_preview(tr, tid))
-
-            x += tile + gap
+            if tier_drawn:
+                c.create_text(x + tile / 2, y_f + tile + 16, text=str(tid), fill=MUTED, font=FONT)
+                x += tile + gap
 
         c.configure(scrollregion=c.bbox("all"))
 
@@ -2096,6 +2371,8 @@ class BattlePassStudio(tk.Tk):
             self.reward_id_var.set("")
         if hasattr(self, "reward_name_var"):
             self.reward_name_var.set("")
+        if hasattr(self, "reward_group_var"):
+            self.reward_group_var.set("")
         if hasattr(self, "reward_type_var"):
             self.reward_type_var.set("item")
             if hasattr(self, "_reward_switch_type"):
