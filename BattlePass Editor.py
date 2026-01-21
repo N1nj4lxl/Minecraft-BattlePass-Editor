@@ -2446,14 +2446,23 @@ class BattlePassStudio(tk.Tk):
             self.state["free"] = safe_load_yaml(self.path_free.get())
             self.state["premium"] = safe_load_yaml(self.path_premium.get())
             self.state["rewards"] = safe_load_yaml(self.path_rewards.get())
-            self.state["quests_path"] = self.path_quests.get()
-            self.state["quests"] = safe_load_yaml(self.state["quests_path"])
-            self.mark_dirty("free", False)
-            self.mark_dirty("premium", False)
-            self.mark_dirty("rewards", False)
-            self.mark_dirty("quests", False)
+
+            qp = self.path_quests.get()
+            self.state["quests_path"] = qp
+            self.state["quests"] = safe_load_yaml(qp)
+
+            wp = self.path_week_pool.get()
+            self.state["week_pool_path"] = wp
+            self.state["week_pool"] = safe_load_yaml(wp)
+
+            for key in self.dirty:
+                self.mark_dirty(key, False)
+
+            self._reward_refresh_list()
+            self._tiers_refresh_list()
+            self._quests_refresh_list()
+            self._render_preview()
             self.set_status("Loaded files successfully.")
-            self.refresh_all_views()
         except Exception as e:
             self.set_status(f"Load error: {e}")
 
