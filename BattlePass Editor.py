@@ -438,6 +438,8 @@ class BattlePassStudio(tk.Tk):
         self.random_tiers_var = tk.StringVar(value="20")
         self.random_rewards_var = tk.StringVar(value="30")
         self.random_weeks_var = tk.StringVar(value=str(MAX_WEEKS))
+        self.random_free_max_var = tk.StringVar(value=str(FREE_TIER_REWARD_LIMIT))
+        self.random_premium_max_var = tk.StringVar(value=str(PREMIUM_TIER_REWARD_LIMIT))
         self.reward_group_var = tk.StringVar(value="")
         self.reward_group_filter_var = tk.StringVar(value="All")
 
@@ -604,11 +606,21 @@ class BattlePassStudio(tk.Tk):
         ttk.Label(rand, text=f"Weeks (max {MAX_WEEKS})").grid(row=2, column=0, sticky="w", padx=10, pady=(8, 2))
         ttk.Entry(rand, textvariable=self.random_weeks_var, width=10).grid(row=2, column=1, sticky="ew", padx=(0, 10), pady=(8, 2))
 
+        ttk.Label(rand, text="Free rewards per tier (max)").grid(row=3, column=0, sticky="w", padx=10, pady=(8, 2))
+        ttk.Entry(rand, textvariable=self.random_free_max_var, width=10).grid(
+            row=3, column=1, sticky="ew", padx=(0, 10), pady=(8, 2)
+        )
+
+        ttk.Label(rand, text="Premium rewards per tier (max)").grid(row=4, column=0, sticky="w", padx=10, pady=(8, 2))
+        ttk.Entry(rand, textvariable=self.random_premium_max_var, width=10).grid(
+            row=4, column=1, sticky="ew", padx=(0, 10), pady=(8, 2)
+        )
+
         ttk.Button(rand, text="Random BattlePass", command=self._random_battlepass_from_inputs).grid(
-            row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 4)
+            row=5, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 4)
         )
         ttk.Button(rand, text="Advanced Randomize All", command=self._randomize_everything).grid(
-            row=4, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 10)
+            row=6, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 10)
         )
 
         self.dirty_var = tk.StringVar(value="Unsaved: none")
@@ -774,21 +786,36 @@ class BattlePassStudio(tk.Tk):
         tiers = clamp_int(self.random_tiers_var.get(), 1, MAX_TIERS, 20)
         rewards = clamp_int(self.random_rewards_var.get(), 1, MAX_REWARDS, 30)
         weeks = clamp_int(self.random_weeks_var.get(), 1, MAX_WEEKS, MAX_WEEKS)
+        free_max = clamp_int(self.random_free_max_var.get(), 0, MAX_REWARDS, FREE_TIER_REWARD_LIMIT)
+        premium_max = clamp_int(self.random_premium_max_var.get(), 0, MAX_REWARDS, PREMIUM_TIER_REWARD_LIMIT)
         self.random_tiers_var.set(str(tiers))
         self.random_rewards_var.set(str(rewards))
         self.random_weeks_var.set(str(weeks))
-        self._generate_random_battlepass(tiers, rewards, weeks)
+        self.random_free_max_var.set(str(free_max))
+        self.random_premium_max_var.set(str(premium_max))
+        self._generate_random_battlepass(tiers, rewards, weeks, free_max, premium_max)
 
     def _randomize_everything(self):
         tiers = random.randint(1, MAX_TIERS)
         rewards = random.randint(1, MAX_REWARDS)
         weeks = random.randint(1, MAX_WEEKS)
+        free_max = clamp_int(self.random_free_max_var.get(), 0, MAX_REWARDS, FREE_TIER_REWARD_LIMIT)
+        premium_max = clamp_int(self.random_premium_max_var.get(), 0, MAX_REWARDS, PREMIUM_TIER_REWARD_LIMIT)
         self.random_tiers_var.set(str(tiers))
         self.random_rewards_var.set(str(rewards))
         self.random_weeks_var.set(str(weeks))
-        self._generate_random_battlepass(tiers, rewards, weeks)
+        self.random_free_max_var.set(str(free_max))
+        self.random_premium_max_var.set(str(premium_max))
+        self._generate_random_battlepass(tiers, rewards, weeks, free_max, premium_max)
 
-    def _generate_random_battlepass(self, tiers_count: int, rewards_count: int, weeks_count: int):
+    def _generate_random_battlepass(
+        self,
+        tiers_count: int,
+        rewards_count: int,
+        weeks_count: int,
+        free_reward_limit: int,
+        premium_reward_limit: int,
+    ):
         rewards = {}
         group_pool = ["Combat", "Mining", "Farming", "Utility", "Exploration"]
         for i in range(1, rewards_count + 1):
@@ -803,10 +830,11 @@ class BattlePassStudio(tk.Tk):
         required_points = 0
         for idx in range(1, tiers_count + 1):
             required_points += random.randint(25, 90)
-            free_limit = min(FREE_TIER_REWARD_LIMIT, len(reward_ids)) if reward_ids else 0
-            prem_limit = min(PREMIUM_TIER_REWARD_LIMIT, len(reward_ids)) if reward_ids else 0
-            free_rewards = random.sample(reward_ids, free_limit) if free_limit else []
+            free_limit = min(free_reward_limit, len(reward_ids)) if reward_ids else 0
+            prem_limit = min(premium_reward_limit, len(reward_ids)) if reward_ids else 0
+            free_count = random.randint(1, free_limit) if free_limit else 0
             prem_count = random.randint(1, prem_limit) if prem_limit else 0
+            free_rewards = random.sample(reward_ids, free_count) if free_count else []
             prem_rewards = random.sample(reward_ids, prem_count) if prem_count else []
             free_tiers[str(idx)] = {"required-points": required_points, "rewards": free_rewards}
             premium_tiers[str(idx)] = {"required-points": required_points, "rewards": prem_rewards}
