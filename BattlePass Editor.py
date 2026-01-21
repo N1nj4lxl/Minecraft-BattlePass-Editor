@@ -27,6 +27,9 @@ FONT_H = ("Segoe UI", 12, "bold")
 MAX_WEEKS = 4
 MAX_REWARDS = 50
 MAX_TIERS = 50
+MAX_WINDOW_WIDTH = 1920
+FREE_TIER_REWARD_LIMIT = 1
+PREMIUM_TIER_REWARD_LIMIT = 2
 
 
 # =========================
@@ -446,8 +449,10 @@ class BattlePassStudio(tk.Tk):
         self.update_idletasks()
         req_width = max(self.winfo_reqwidth(), 1550)
         req_height = max(self.winfo_reqheight(), 860)
+        req_width = min(req_width, MAX_WINDOW_WIDTH)
         self.geometry(f"{req_width}x{req_height}")
         self.minsize(req_width, req_height)
+        self.maxsize(MAX_WINDOW_WIDTH, self.winfo_screenheight())
 
     # -------------------------
     # STYLE
@@ -798,10 +803,13 @@ class BattlePassStudio(tk.Tk):
         required_points = 0
         for idx in range(1, tiers_count + 1):
             required_points += random.randint(25, 90)
-            reward_count = random.randint(1, min(3, len(reward_ids))) if reward_ids else 0
-            tier_rewards = random.sample(reward_ids, reward_count) if reward_count else []
-            free_tiers[str(idx)] = {"required-points": required_points, "rewards": tier_rewards}
-            premium_tiers[str(idx)] = {"required-points": required_points, "rewards": random.sample(reward_ids, reward_count) if reward_count else []}
+            free_limit = min(FREE_TIER_REWARD_LIMIT, len(reward_ids)) if reward_ids else 0
+            prem_limit = min(PREMIUM_TIER_REWARD_LIMIT, len(reward_ids)) if reward_ids else 0
+            free_rewards = random.sample(reward_ids, free_limit) if free_limit else []
+            prem_count = random.randint(1, prem_limit) if prem_limit else 0
+            prem_rewards = random.sample(reward_ids, prem_count) if prem_count else []
+            free_tiers[str(idx)] = {"required-points": required_points, "rewards": free_rewards}
+            premium_tiers[str(idx)] = {"required-points": required_points, "rewards": prem_rewards}
 
         quest_count = min(weeks_count * 10, 50)
         quests = {}
@@ -833,7 +841,7 @@ class BattlePassStudio(tk.Tk):
         self._reward_refresh_list()
         self._tiers_refresh_list()
         self._quests_refresh_list()
-        self._render_preview()
+        self._render_preview_battlepass()
         self.set_status("Random BattlePass generated.")
 
     # =========================
@@ -1366,6 +1374,17 @@ class BattlePassStudio(tk.Tk):
         ttk.Button(btnrow, text="Delete", command=self._tier_delete).grid(row=0, column=2, sticky="ew", padx=(0, 6))
         ttk.Button(btnrow, text="Random Reward", command=self._tier_add_random_reward).grid(row=0, column=3, sticky="ew")
 
+        mass_row = ttk.Labelframe(left, text="Mass Actions")
+        mass_row.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
+        mass_row.grid_columnconfigure(0, weight=1)
+        mass_row.grid_columnconfigure(1, weight=1)
+        ttk.Button(mass_row, text="Randomize Rewards (All Tiers)", command=self._tiers_randomize_rewards).grid(
+            row=0, column=0, sticky="ew", padx=(0, 6), pady=6
+        )
+        ttk.Button(mass_row, text="Delete All Tiers", command=self._tiers_delete_all).grid(
+            row=0, column=1, sticky="ew", pady=6
+        )
+
         right = ttk.Labelframe(self.tab_tiers, text="Tier Editor")
         right.grid(row=0, column=1, sticky="nsew")
         right.grid_rowconfigure(99, weight=1)
@@ -1563,6 +1582,54 @@ class BattlePassStudio(tk.Tk):
         sel = tv.selection()
         return sel[0] if sel else ""
 
+    def _set_drag_selection(self, tv: ttk.Treeview, iid: str):
+        try:
+            tv.selection_set(iid)
+            tv.focus(iid)
+            tv.see(iid)
+            tv.configure(cursor="fleur")
+        except Exception:
+            pass
+
+    def _clear_drag_selection(self, tv: ttk.Treeview):
+        try:
+            tv.configure(cursor="")
+        except Exception:
+            pass
+
+    def _tier_reward_limit(self, track: str | None = None) -> int:
+        tr = (track or self.track_var.get()).strip().lower()
+        if tr == "premium":
+            return PREMIUM_TIER_REWARD_LIMIT
+        return FREE_TIER_REWARD_LIMIT
+
+    def _clamp_tier_rewards(self, rewards: list[str], track: str | None = None) -> tuple[list[str], bool]:
+        limit = self._tier_reward_limit(track)
+        if len(rewards) <= limit:
+            return rewards, False
+        return rewards[:limit], True
+
+    def _enforce_tier_reward_limits(self, track: str) -> bool:
+        tr = track.strip().lower()
+        if tr not in ("free", "premium"):
+            return False
+        pd = ensure_dict(self.state.get(tr, {}))
+        tiers = ensure_dict(pd.get("tiers", {}))
+        limit = self._tier_reward_limit(tr)
+        trimmed_any = False
+        for tid, tier in tiers.items():
+            t = ensure_dict(tier)
+            rewards = [str(x) for x in ensure_list(t.get("rewards", []))]
+            if len(rewards) > limit:
+                t["rewards"] = rewards[:limit]
+                tiers[tid] = t
+                trimmed_any = True
+        if trimmed_any:
+            pd["tiers"] = tiers
+            self.state[tr] = pd
+            self.mark_dirty(tr, True)
+        return trimmed_any
+
     def _normalize_tier_id(self, raw: str) -> str:
         tid = str(raw or "").strip()
         if not tid:
@@ -1605,6 +1672,7 @@ class BattlePassStudio(tk.Tk):
             return
         item = self.tv_rewards.identify_row(event.y)
         if item:
+            self._set_drag_selection(self.tv_rewards, item)
             self.drag_data = {"item": item, "tv": "rewards"}
 
     def _on_rewards_drag_drop(self, event):
@@ -1621,6 +1689,7 @@ class BattlePassStudio(tk.Tk):
             idx = self.tv_rewards.index(target)
             self.tv_rewards.move(item, "", idx)
             self._reorder_rewards_from_treeview()
+        self._clear_drag_selection(self.tv_rewards)
         self.drag_data = {"item": None, "tv": None}
 
     def _reorder_rewards_from_treeview(self):
@@ -1667,6 +1736,10 @@ class BattlePassStudio(tk.Tk):
     def _tiers_refresh_list(self):
         if not hasattr(self, "tv_tiers"):
             return
+        tr = self.track_var.get().strip().lower()
+        if tr not in ("free", "premium"):
+            tr = "free"
+        self._enforce_tier_reward_limits(tr)
         self.tv_tiers.delete(*self.tv_tiers.get_children())
         tiers = self._tiers_dict()
         for tid in sorted(tiers.keys(), key=numeric_sort_key):
@@ -1681,6 +1754,7 @@ class BattlePassStudio(tk.Tk):
             return
         item = self.tv_tiers.identify_row(event.y)
         if item:
+            self._set_drag_selection(self.tv_tiers, item)
             self.drag_data = {"item": item, "tv": "tiers"}
 
     def _on_tiers_drag_drop(self, event):
@@ -1694,6 +1768,7 @@ class BattlePassStudio(tk.Tk):
             idx = self.tv_tiers.index(target)
             self.tv_tiers.move(item, "", idx)
             self._reorder_tiers_from_treeview()
+        self._clear_drag_selection(self.tv_tiers)
         self.drag_data = {"item": None, "tv": None}
 
     def _reorder_tiers_from_treeview(self):
@@ -1836,6 +1911,12 @@ class BattlePassStudio(tk.Tk):
             if v:
                 rewards.append(v)
 
+        rewards, trimmed = self._clamp_tier_rewards(rewards, tr)
+        if trimmed:
+            self.lb_tier_rewards.delete(0, "end")
+            for rid in rewards:
+                self.lb_tier_rewards.insert("end", rid)
+
         t["required-points"] = req
         t["rewards"] = rewards
         if tid != original_tid:
@@ -1849,7 +1930,10 @@ class BattlePassStudio(tk.Tk):
         self._tiers_select(tid)
         self.tier_original_id = tid
         self.tier_id_var.set(tid)
-        self.set_status(f"Applied changes to {tr} tier {tid}.")
+        if trimmed:
+            self.set_status(f"Applied changes to {tr} tier {tid} (trimmed to {self._tier_reward_limit(tr)} rewards).")
+        else:
+            self.set_status(f"Applied changes to {tr} tier {tid}.")
         self._render_preview_battlepass()
 
     def _tier_apply_yaml(self):
@@ -1874,6 +1958,11 @@ class BattlePassStudio(tk.Tk):
             self.set_status(f"Tier YAML error: {e}")
             return
 
+        rewards = [str(x) for x in ensure_list(data.get("rewards", []))]
+        rewards, trimmed = self._clamp_tier_rewards(rewards)
+        if trimmed:
+            data["rewards"] = rewards
+
         tr = self.track_var.get().strip().lower()
         pd = ensure_dict(self.state.get(tr, {}))
         tiers = ensure_dict(pd.get("tiers", {}))
@@ -1890,7 +1979,10 @@ class BattlePassStudio(tk.Tk):
         self._tiers_select(tid)
         self.tier_original_id = tid
         self.tier_id_var.set(tid)
-        self.set_status(f"Applied YAML to {tr} tier {tid}.")
+        if trimmed:
+            self.set_status(f"Applied YAML to {tr} tier {tid} (trimmed to {self._tier_reward_limit(tr)} rewards).")
+        else:
+            self.set_status(f"Applied YAML to {tr} tier {tid}.")
         self._render_preview_battlepass()
 
     def _tier_revert(self):
@@ -1907,6 +1999,10 @@ class BattlePassStudio(tk.Tk):
         tid = self._tv_selected_iid(self.tv_tiers)
         if not tid:
             self.set_status("Select a tier first.")
+            return
+        limit = self._tier_reward_limit()
+        if self.lb_tier_rewards.size() >= limit:
+            self.set_status(f"{self.track_var.get().title()} tiers can only hold {limit} reward(s).")
             return
 
         rewards = ensure_dict(self.state.get("rewards", {}))
@@ -1932,6 +2028,11 @@ class BattlePassStudio(tk.Tk):
             self.set_status("Enter a reward ID.")
             return
         cur = [str(self.lb_tier_rewards.get(i)).strip() for i in range(self.lb_tier_rewards.size())]
+        limit = self._tier_reward_limit()
+        if rid not in cur and len(cur) >= limit:
+            self.set_status(f"{self.track_var.get().title()} tiers can only hold {limit} reward(s).")
+            self.tier_add_reward_id_var.set("")
+            return
         if rid not in cur:
             self.lb_tier_rewards.insert("end", rid)
         self.tier_add_reward_id_var.set("")
@@ -1945,6 +2046,52 @@ class BattlePassStudio(tk.Tk):
 
     def _tier_remove_all_rewards(self):
         self.lb_tier_rewards.delete(0, "end")
+
+    def _tiers_randomize_rewards(self):
+        tr = self.track_var.get().strip().lower()
+        if tr not in ("free", "premium"):
+            tr = "free"
+        pd = ensure_dict(self.state.get(tr, {}))
+        tiers = ensure_dict(pd.get("tiers", {}))
+        if not tiers:
+            self.set_status("No tiers to randomize.")
+            return
+        reward_ids = list(ensure_dict(self.state.get("rewards", {})).keys())
+        if not reward_ids:
+            for tid in tiers:
+                tiers[tid] = {**ensure_dict(tiers.get(tid, {})), "rewards": []}
+            pd["tiers"] = tiers
+            self.state[tr] = pd
+            self.mark_dirty(tr, True)
+            self._tiers_refresh_list()
+            self._render_preview_battlepass()
+            self.set_status("Cleared tier rewards (no rewards available).")
+            return
+        limit = self._tier_reward_limit(tr)
+        for tid in tiers:
+            t = ensure_dict(tiers.get(tid, {}))
+            count = 1 if limit == 1 else random.randint(1, limit)
+            t["rewards"] = random.sample(reward_ids, min(count, len(reward_ids)))
+            tiers[tid] = t
+        pd["tiers"] = tiers
+        self.state[tr] = pd
+        self.mark_dirty(tr, True)
+        self._tiers_refresh_list()
+        self._render_preview_battlepass()
+        self.set_status(f"Randomized rewards for all {tr} tiers.")
+
+    def _tiers_delete_all(self):
+        tr = self.track_var.get().strip().lower()
+        if tr not in ("free", "premium"):
+            tr = "free"
+        pd = ensure_dict(self.state.get(tr, {}))
+        pd["tiers"] = {}
+        self.state[tr] = pd
+        self.mark_dirty(tr, True)
+        self._tiers_refresh_list()
+        self._tier_clear_editor()
+        self._render_preview_battlepass()
+        self.set_status(f"Deleted all tiers in {tr}.")
 
     # -------------------------
     # Quests Logic
@@ -2163,6 +2310,9 @@ class BattlePassStudio(tk.Tk):
     def _render_preview_battlepass(self):
         if not hasattr(self, "preview_canvas"):
             return
+
+        self._enforce_tier_reward_limits("free")
+        self._enforce_tier_reward_limits("premium")
 
         c = self.preview_canvas
         c.delete("all")
