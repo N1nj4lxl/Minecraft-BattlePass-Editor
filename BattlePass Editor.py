@@ -416,7 +416,15 @@ class BattlePassStudio(tk.Tk):
         self.path_week_pool = tk.StringVar(value=self._autodetect_in_dir("week-pool.yml"))
 
         self._build_ui()
+        self._apply_window_constraints()
         self.reload_all()
+
+    def _apply_window_constraints(self):
+        self.update_idletasks()
+        req_width = max(self.winfo_reqwidth(), 1550)
+        req_height = max(self.winfo_reqheight(), 860)
+        self.geometry(f"{req_width}x{req_height}")
+        self.minsize(req_width, req_height)
 
     # -------------------------
     # STYLE
