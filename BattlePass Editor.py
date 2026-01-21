@@ -119,53 +119,77 @@ MATERIALS = [
     "emerald:0",
     "gold_ingot:0",
     "iron_ingot:0",
-    "netherite_ingot:0",
-    "totem_of_undying:0",
-    "enchanted_golden_apple:0",
-    "ender_pearl:0",
-    "diamond_sword:0",
-    "diamond_pickaxe:0",
-    "diamond_chestplate:0",
-    "shulker_box:0",
-    "elytra:0",
-    "trident:0",
-    "experience_bottle:0",
-    "golden_apple:0",
-    "netherite_sword:0",
-    "netherite_pickaxe:0",
-    "bow:0",
-    "crossbow:0",
-    "arrow:0",
+    "redstone:0",
+    "lapis_lazuli:0",
+    "coal:0",
+    "stone:0",
+    "oak_log:0",
+    "glass:0",
+    "torch:0",
+    "bread:0",
+    "cooked_beef:0",
 ]
 
-MOBS = ["zombie", "skeleton", "creeper", "spider", "enderman", "witch", "slime", "pillager", "guardian", "blaze"]
-BLOCKS = ["stone", "coal_ore", "iron_ore", "diamond_ore", "oak_log", "sand", "netherrack", "obsidian", "deepslate"]
+BLOCKS = ["stone", "coal_ore", "iron_ore", "redstone_ore", "oak_log", "sand", "deepslate", "cobblestone", "glass"]
 FISH = ["cod", "salmon", "tropical_fish", "pufferfish"]
+CROPS = ["wheat", "carrot", "potato", "beetroot"]
+CRAFT_ITEMS = ["bread", "torch", "glass", "chest", "oak_planks", "stone_bricks"]
+SMELT_ITEMS = ["iron_ingot", "gold_ingot", "glass", "charcoal"]
 
 
 def gen_reward_command():
-    name = random.choice(["Starter Bundle", "Lucky Key", "Cash Drop", "VIP Boost", "Supply Crate", "Charm Pack"])
-    cmd_templates = [
-        "give %player% diamond {amt}",
-        "eco give %player% {money}",
-        "lp user %player% permission settemp battlepass.boost.{n} true {dur}d",
-        "crate key give %player% {key} {amt}",
-        "minecraft:give %player% experience_bottle {amt}",
+    bundles = [
+        {
+            "name": "Food Bundle",
+            "commands": [
+                "minecraft:give %player% bread 8",
+                "minecraft:give %player% cooked_beef 6",
+            ],
+        },
+        {
+            "name": "Building Bundle",
+            "commands": [
+                "minecraft:give %player% stone 64",
+                "minecraft:give %player% oak_log 32",
+                "minecraft:give %player% glass 32",
+                "minecraft:give %player% torch 24",
+            ],
+        },
+        {
+            "name": "Mining Bundle",
+            "commands": [
+                "minecraft:give %player% coal 24",
+                "minecraft:give %player% iron_ingot 12",
+                "minecraft:give %player% gold_ingot 6",
+                "minecraft:give %player% redstone 24",
+            ],
+        },
     ]
-    cmd = random.choice(cmd_templates).format(
-        amt=random.choice([1, 2, 3, 5, 8, 16]),
-        money=random.choice([250, 500, 750, 1000, 1500, 2000]),
-        n=random.choice([1, 2, 3]),
-        dur=random.choice([1, 3, 7, 14]),
-        key=random.choice(["basic", "rare", "epic"]),
-    )
-    return {"name": name, "type": "command", "commands": [cmd], "lore-addon": ["&7Auto-generated reward."]}
+    bundle = random.choice(bundles)
+    return {
+        "name": bundle["name"],
+        "type": "command",
+        "commands": bundle["commands"],
+        "lore-addon": ["&7Auto-generated utility bundle."],
+    }
+
+
+def gen_reward_xp():
+    mode = random.choice(["levels", "points"])
+    amount = random.choice([3, 5, 8, 12, 15, 20]) if mode == "levels" else random.choice([50, 75, 100, 150, 200, 250])
+    name = f"XP Reward ({amount} {'Levels' if mode == 'levels' else 'Points'})"
+    return {
+        "name": name,
+        "type": "xp",
+        "commands": [f"xp add %player% {amount} {mode}"],
+        "lore-addon": ["&7Auto-generated XP reward."],
+    }
 
 
 def gen_reward_item():
     mat = random.choice(MATERIALS)
     amt = random.choice([1, 1, 2, 3, 5, 8, 16])
-    name = random.choice(["Loot Pack", "Miner Kit", "PvP Kit", "Explorer Bundle", "Treasure Drop", "Supply Cache"])
+    name = random.choice(["Loot Pack", "Miner Kit", "Builder Bundle", "Explorer Bundle", "Treasure Drop", "Supply Cache"])
     lore = [
         "&7Auto-generated item reward.",
         "&7Contains: &f{0}x &f{1}".format(amt, mat.split(":")[0].replace("_", " ").title()),
@@ -176,37 +200,24 @@ def gen_reward_item():
     return {"name": name, "type": "item", "items": {"1": item}, "lore-addon": ["&7Auto-generated reward."]}
 
 
-def gen_reward_money():
-    name = random.choice(["Coins", "Pouch of Coins", "Gold Stash", "Bank Transfer"])
-    val = random.choice([250, 500, 750, 1000, 1500, 2000])
-    return {"name": name, "type": "money", "value": val, "lore-addon": ["&7Auto-generated reward."]}
-
-
 def gen_random_reward():
     pick = random.random()
-    if pick < 0.45:
-        return gen_reward_command()
-    if pick < 0.85:
+    if pick < 0.4:
         return gen_reward_item()
-    return gen_reward_money()
+    if pick < 0.75:
+        return gen_reward_xp()
+    return gen_reward_command()
 
 
 def gen_random_quest():
-    qtype = random.choice(["block-break", "kill-mob", "fish", "craft-item"])
-    if qtype == "kill-mob":
-        mob = random.choice(MOBS)
-        need = random.choice([5, 10, 15, 20, 25, 30])
-        points = random.choice([10, 15, 20, 25, 30])
-        name = "&eKill &f{0} &e{1}".format(need, mob.replace("_", " ").title())
-        variable = mob
-        item_mat = "iron_sword:0"
-    elif qtype == "block-break":
+    qtype = random.choice(["block-break", "fish", "craft-item", "smelt-item", "harvest", "playtime", "explore"])
+    if qtype == "block-break":
         blk = random.choice(BLOCKS)
         need = random.choice([16, 32, 64, 128])
         points = random.choice([10, 15, 20, 25])
         name = "&eMine &f{0} &e{1}".format(need, blk.replace("_", " ").title())
         variable = blk
-        item_mat = "diamond_pickaxe:0"
+        item_mat = "iron_pickaxe:0"
     elif qtype == "fish":
         fish = random.choice(FISH)
         need = random.choice([5, 10, 15, 20])
@@ -214,13 +225,39 @@ def gen_random_quest():
         name = "&eCatch &f{0} &e{1}".format(need, fish.replace("_", " ").title())
         variable = fish
         item_mat = "fishing_rod:0"
-    else:
-        mat = random.choice(["bread", "torch", "iron_pickaxe", "diamond_sword", "golden_apple"])
+    elif qtype == "craft-item":
+        mat = random.choice(CRAFT_ITEMS)
         need = random.choice([4, 8, 16, 24, 32])
         points = random.choice([10, 15, 20, 25, 30])
         name = "&eCraft &f{0} &e{1}".format(need, mat.replace("_", " ").title())
         variable = mat
         item_mat = "crafting_table:0"
+    elif qtype == "smelt-item":
+        mat = random.choice(SMELT_ITEMS)
+        need = random.choice([8, 16, 24, 32])
+        points = random.choice([10, 15, 20, 25])
+        name = "&eSmelt &f{0} &e{1}".format(need, mat.replace("_", " ").title())
+        variable = mat
+        item_mat = "furnace:0"
+    elif qtype == "harvest":
+        crop = random.choice(CROPS)
+        need = random.choice([16, 32, 48, 64])
+        points = random.choice([10, 15, 20, 25])
+        name = "&eHarvest &f{0} &e{1}".format(need, crop.replace("_", " ").title())
+        variable = crop
+        item_mat = "iron_hoe:0"
+    elif qtype == "playtime":
+        need = random.choice([10, 20, 30, 45, 60])
+        points = random.choice([10, 15, 20, 25, 30])
+        name = "&ePlay for &f{0} &eminutes".format(need)
+        variable = "minutes"
+        item_mat = "clock:0"
+    else:
+        need = random.choice([500, 1000, 1500, 2000])
+        points = random.choice([10, 15, 20, 25, 30])
+        name = "&eExplore &f{0} &eblocks".format(need)
+        variable = "distance"
+        item_mat = "compass:0"
 
     lore = [
         "&7Progress: &f%progress_bar% &7(&f%percentage_progress%%&7)",
@@ -246,15 +283,13 @@ def reward_emoji(reward: dict) -> str:
     t = str(r.get("type", "")).lower()
     name = str(r.get("name", "")).lower()
 
-    if t == "money":
-        return "💰"
+    if t == "xp":
+        return "🧪"
     if t == "command":
         if "crate" in name or "key" in name or "supply" in name:
             return "📦"
         if "boost" in name or "vip" in name:
             return "⭐"
-        if "cash" in name or "coin" in name or "gold" in name:
-            return "💰"
         return "⚙️"
     if t == "item":
         items = ensure_dict(r.get("items", {}))
@@ -718,7 +753,7 @@ class BattlePassStudio(tk.Tk):
 
         self.reward_id_var = tk.StringVar()
         self.reward_name_var = tk.StringVar()
-        self.reward_type_var = tk.StringVar(value="command")
+        self.reward_type_var = tk.StringVar(value="item")
 
         ttk.Label(sc.inner, text="ID").grid(row=0, column=0, sticky="w", pady=2)
         ttk.Entry(sc.inner, textvariable=self.reward_id_var, state="readonly").grid(row=0, column=1, sticky="ew", pady=2)
@@ -727,7 +762,7 @@ class BattlePassStudio(tk.Tk):
         ttk.Entry(sc.inner, textvariable=self.reward_name_var).grid(row=1, column=1, sticky="ew", pady=2)
 
         ttk.Label(sc.inner, text="Type").grid(row=2, column=0, sticky="w", pady=2)
-        cb = ttk.Combobox(sc.inner, textvariable=self.reward_type_var, values=["command", "item", "money"], state="readonly")
+        cb = ttk.Combobox(sc.inner, textvariable=self.reward_type_var, values=["item", "command", "xp"], state="readonly")
         cb.grid(row=2, column=1, sticky="ew", pady=2)
         cb.bind("<<ComboboxSelected>>", lambda _e: self._reward_switch_type())
 
@@ -745,9 +780,7 @@ class BattlePassStudio(tk.Tk):
 
         self.fr_cmd = ttk.Labelframe(self.reward_type_stack, text="Commands (one per line)")
         self.fr_item = ttk.Labelframe(self.reward_type_stack, text="Item Editor (items['1'])")
-        self.fr_money = ttk.Labelframe(self.reward_type_stack, text="Money")
-
-        for fr in (self.fr_cmd, self.fr_item, self.fr_money):
+        for fr in (self.fr_cmd, self.fr_item):
             fr.grid(row=0, column=0, sticky="ew")
             fr.grid_columnconfigure(0, weight=1)
 
@@ -777,13 +810,6 @@ class BattlePassStudio(tk.Tk):
         ttk.Label(self.fr_item, text="Lore (one per line)").grid(row=1, column=0, sticky="w", padx=10)
         self.txt_item_lore = tk.Text(self.fr_item, height=6, wrap="word")
         self.txt_item_lore.grid(row=2, column=0, sticky="ew", padx=10, pady=(2, 10))
-
-        self.money_value_var = tk.StringVar(value="0")
-        m = ttk.Frame(self.fr_money)
-        m.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
-        m.grid_columnconfigure(1, weight=1)
-        ttk.Label(m, text="Value").grid(row=0, column=0, sticky="w", padx=(0, 10))
-        ttk.Entry(m, textvariable=self.money_value_var).grid(row=0, column=1, sticky="ew")
 
         ttk.Label(sc.inner, text="Advanced YAML (optional, overrides editor when applied)").grid(row=6, column=0, sticky="nw", pady=(10, 2))
         self.txt_reward_yaml = tk.Text(sc.inner, height=10, wrap="word")
@@ -817,14 +843,17 @@ class BattlePassStudio(tk.Tk):
     def _reward_load_editor(self, rid: str, r: dict):
         self.reward_id_var.set(rid)
         self.reward_name_var.set(str(r.get("name", "")))
-        self.reward_type_var.set(str(r.get("type", "command")).lower() or "command")
+        reward_type = str(r.get("type", "item")).lower() or "item"
+        if reward_type not in {"item", "command", "xp"}:
+            reward_type = "command"
+        self.reward_type_var.set(reward_type)
         self._reward_switch_type()
 
         self._set_text(self.txt_reward_loreaddon, join_lines(ensure_list(r.get("lore-addon", []))))
         self._set_text(self.txt_reward_vars, join_lines(kv_to_lines(ensure_dict(r.get("variables", {})))))
 
         t = self.reward_type_var.get()
-        if t == "command":
+        if t in {"command", "xp"}:
             self._set_text(self.txt_reward_cmds, join_lines(ensure_list(r.get("commands", []))))
         elif t == "item":
             items = ensure_dict(r.get("items", {}))
@@ -834,8 +863,6 @@ class BattlePassStudio(tk.Tk):
             self.item_dispname_var.set(str(it.get("name", "")))
             self.item_glow_var.set(bool(it.get("glow", False)))
             self._set_text(self.txt_item_lore, join_lines(ensure_list(it.get("lore", []))))
-        elif t == "money":
-            self.money_value_var.set(str(r.get("value", "0")))
 
         self._set_text(self.txt_reward_yaml, yaml.safe_dump(r, sort_keys=False))
 
@@ -843,18 +870,21 @@ class BattlePassStudio(tk.Tk):
         t = self.reward_type_var.get().strip().lower()
         self.fr_cmd.grid_remove()
         self.fr_item.grid_remove()
-        self.fr_money.grid_remove()
         if t == "item":
             self.fr_item.grid()
-        elif t == "money":
-            self.fr_money.grid()
         else:
+            label = "XP Commands (one per line)" if t == "xp" else "Commands (one per line)"
+            self.fr_cmd.configure(text=label)
             self.fr_cmd.grid()
 
     def _reward_add(self):
         rewards = self._rewards_dict()
         rid = next_numeric_string_id(rewards.keys())
-        rewards[rid] = {"name": "New Reward", "type": "command", "commands": ["say %player% got a reward!"]}
+        rewards[rid] = {
+            "name": "New Reward",
+            "type": "item",
+            "items": {"1": {"material": "stone:0", "amount": 1, "name": "&bUtility Block"}},
+        }
         self.state["rewards"] = rewards
         self.mark_dirty("rewards", True)
         self._refresh_rewards_list()
@@ -1004,7 +1034,7 @@ class BattlePassStudio(tk.Tk):
         r = ensure_dict(rewards.get(rid, {}))
 
         r["name"] = self.reward_name_var.get().strip() or "Reward"
-        r["type"] = self.reward_type_var.get().strip().lower() or "command"
+        r["type"] = self.reward_type_var.get().strip().lower() or "item"
 
         r["lore-addon"] = split_lines(self._get_text(self.txt_reward_loreaddon))
 
@@ -1023,7 +1053,7 @@ class BattlePassStudio(tk.Tk):
             r.pop("variables", None)
 
         t = r["type"]
-        if t == "command":
+        if t in {"command", "xp"}:
             r["commands"] = split_lines(self._get_text(self.txt_reward_cmds))
             r.pop("items", None)
             r.pop("value", None)
@@ -1056,17 +1086,6 @@ class BattlePassStudio(tk.Tk):
 
             r.pop("commands", None)
             r.pop("value", None)
-
-        elif t == "money":
-            val_raw = self.money_value_var.get().strip()
-            try:
-                val = int(val_raw)
-            except Exception:
-                val = 0
-            r["value"] = val
-
-            r.pop("commands", None)
-            r.pop("items", None)
 
         rewards[rid] = r
         self.state["rewards"] = rewards
@@ -2032,7 +2051,7 @@ class BattlePassStudio(tk.Tk):
         if hasattr(self, "reward_name_var"):
             self.reward_name_var.set("")
         if hasattr(self, "reward_type_var"):
-            self.reward_type_var.set("command")
+            self.reward_type_var.set("item")
             if hasattr(self, "_reward_switch_type"):
                 self._reward_switch_type()
 
@@ -2056,8 +2075,6 @@ class BattlePassStudio(tk.Tk):
         if hasattr(self, "txt_item_lore"):
             self._set_text(self.txt_item_lore, "")
 
-        if hasattr(self, "money_value_var"):
-            self.money_value_var.set("0")
 
 
 if __name__ == "__main__":
