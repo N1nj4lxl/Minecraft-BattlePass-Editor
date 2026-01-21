@@ -215,11 +215,22 @@ def gen_reward_item():
     return {"name": name, "type": "item", "items": {"1": item}, "lore-addon": ["&7Auto-generated reward."]}
 
 
-def gen_random_reward():
-    pick = random.random()
-    if pick < 0.4:
+def gen_random_reward(allowed_types=None):
+    type_weights = {
+        "item": 0.4,
+        "xp": 0.35,
+        "command": 0.25,
+    }
+    if allowed_types:
+        choices = [t for t in allowed_types if t in type_weights]
+    else:
+        choices = list(type_weights.keys())
+    if not choices:
+        choices = list(type_weights.keys())
+    pick = random.choices(choices, weights=[type_weights[t] for t in choices], k=1)[0]
+    if pick == "item":
         return gen_reward_item()
-    if pick < 0.75:
+    if pick == "xp":
         return gen_reward_xp()
     return gen_reward_command()
 
@@ -440,6 +451,11 @@ class BattlePassStudio(tk.Tk):
         self.random_weeks_var = tk.StringVar(value=str(MAX_WEEKS))
         self.random_free_max_var = tk.StringVar(value=str(FREE_TIER_REWARD_LIMIT))
         self.random_premium_max_var = tk.StringVar(value=str(PREMIUM_TIER_REWARD_LIMIT))
+        self.random_free_tiers_max_var = tk.StringVar(value=str(MAX_TIERS))
+        self.random_premium_tiers_max_var = tk.StringVar(value=str(MAX_TIERS))
+        self.random_reward_item_var = tk.BooleanVar(value=True)
+        self.random_reward_xp_var = tk.BooleanVar(value=True)
+        self.random_reward_command_var = tk.BooleanVar(value=True)
         self.reward_group_var = tk.StringVar(value="")
         self.reward_group_filter_var = tk.StringVar(value="All")
 
@@ -616,11 +632,28 @@ class BattlePassStudio(tk.Tk):
             row=4, column=1, sticky="ew", padx=(0, 10), pady=(8, 2)
         )
 
+        ttk.Label(rand, text="Free Tiers Max").grid(row=5, column=0, sticky="w", padx=10, pady=(8, 2))
+        ttk.Entry(rand, textvariable=self.random_free_tiers_max_var, width=10).grid(
+            row=5, column=1, sticky="ew", padx=(0, 10), pady=(8, 2)
+        )
+
+        ttk.Label(rand, text="Premium Tiers Max").grid(row=6, column=0, sticky="w", padx=10, pady=(8, 2))
+        ttk.Entry(rand, textvariable=self.random_premium_tiers_max_var, width=10).grid(
+            row=6, column=1, sticky="ew", padx=(0, 10), pady=(8, 2)
+        )
+
+        ttk.Label(rand, text="Reward Types").grid(row=7, column=0, sticky="w", padx=10, pady=(8, 2))
+        types_row = ttk.Frame(rand)
+        types_row.grid(row=7, column=1, sticky="ew", padx=(0, 10), pady=(8, 2))
+        ttk.Checkbutton(types_row, text="Item", variable=self.random_reward_item_var).grid(row=0, column=0, sticky="w")
+        ttk.Checkbutton(types_row, text="XP", variable=self.random_reward_xp_var).grid(row=0, column=1, sticky="w", padx=(6, 0))
+        ttk.Checkbutton(types_row, text="Command", variable=self.random_reward_command_var).grid(row=0, column=2, sticky="w", padx=(6, 0))
+
         ttk.Button(rand, text="Random BattlePass", command=self._random_battlepass_from_inputs).grid(
-            row=5, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 4)
+            row=8, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 4)
         )
         ttk.Button(rand, text="Advanced Randomize All", command=self._randomize_everything).grid(
-            row=6, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 10)
+            row=9, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 10)
         )
 
         self.dirty_var = tk.StringVar(value="Unsaved: none")
@@ -782,18 +815,42 @@ class BattlePassStudio(tk.Tk):
         else:
             self.set_status("Nothing to generate.")
 
+    def _get_random_reward_types(self):
+        types = []
+        if self.random_reward_item_var.get():
+            types.append("item")
+        if self.random_reward_xp_var.get():
+            types.append("xp")
+        if self.random_reward_command_var.get():
+            types.append("command")
+        return types or ["item", "xp", "command"]
+
     def _random_battlepass_from_inputs(self):
         tiers = clamp_int(self.random_tiers_var.get(), 1, MAX_TIERS, 20)
         rewards = clamp_int(self.random_rewards_var.get(), 1, MAX_REWARDS, 30)
         weeks = clamp_int(self.random_weeks_var.get(), 1, MAX_WEEKS, MAX_WEEKS)
         free_max = clamp_int(self.random_free_max_var.get(), 0, MAX_REWARDS, FREE_TIER_REWARD_LIMIT)
         premium_max = clamp_int(self.random_premium_max_var.get(), 0, MAX_REWARDS, PREMIUM_TIER_REWARD_LIMIT)
+        free_tiers_max = clamp_int(self.random_free_tiers_max_var.get(), 0, tiers, tiers)
+        premium_tiers_max = clamp_int(self.random_premium_tiers_max_var.get(), 0, tiers, tiers)
+        reward_types = self._get_random_reward_types()
         self.random_tiers_var.set(str(tiers))
         self.random_rewards_var.set(str(rewards))
         self.random_weeks_var.set(str(weeks))
         self.random_free_max_var.set(str(free_max))
         self.random_premium_max_var.set(str(premium_max))
-        self._generate_random_battlepass(tiers, rewards, weeks, free_max, premium_max)
+        self.random_free_tiers_max_var.set(str(free_tiers_max))
+        self.random_premium_tiers_max_var.set(str(premium_tiers_max))
+        self._generate_random_battlepass(
+            tiers,
+            rewards,
+            weeks,
+            free_max,
+            premium_max,
+            free_tiers_max,
+            premium_tiers_max,
+            reward_types,
+        )
 
     def _randomize_everything(self):
         tiers = random.randint(1, MAX_TIERS)
@@ -801,12 +858,26 @@ class BattlePassStudio(tk.Tk):
         weeks = random.randint(1, MAX_WEEKS)
         free_max = clamp_int(self.random_free_max_var.get(), 0, MAX_REWARDS, FREE_TIER_REWARD_LIMIT)
         premium_max = clamp_int(self.random_premium_max_var.get(), 0, MAX_REWARDS, PREMIUM_TIER_REWARD_LIMIT)
+        free_tiers_max = clamp_int(self.random_free_tiers_max_var.get(), 0, tiers, tiers)
+        premium_tiers_max = clamp_int(self.random_premium_tiers_max_var.get(), 0, tiers, tiers)
+        reward_types = self._get_random_reward_types()
         self.random_tiers_var.set(str(tiers))
         self.random_rewards_var.set(str(rewards))
         self.random_weeks_var.set(str(weeks))
         self.random_free_max_var.set(str(free_max))
         self.random_premium_max_var.set(str(premium_max))
-        self._generate_random_battlepass(tiers, rewards, weeks, free_max, premium_max)
+        self.random_free_tiers_max_var.set(str(free_tiers_max))
+        self.random_premium_tiers_max_var.set(str(premium_tiers_max))
+        self._generate_random_battlepass(
+            tiers,
+            rewards,
+            weeks,
+            free_max,
+            premium_max,
+            free_tiers_max,
+            premium_tiers_max,
+            reward_types,
+        )
 
     def _generate_random_battlepass(
         self,
@@ -815,11 +886,14 @@ class BattlePassStudio(tk.Tk):
         weeks_count: int,
         free_reward_limit: int,
         premium_reward_limit: int,
+        free_tiers_max: int,
+        premium_tiers_max: int,
+        reward_types,
     ):
         rewards = {}
         group_pool = ["Combat", "Mining", "Farming", "Utility", "Exploration"]
         for i in range(1, rewards_count + 1):
-            reward = gen_random_reward()
+            reward = gen_random_reward(reward_types)
             if random.random() < 0.6:
                 reward["group"] = random.choice(group_pool)
             rewards[str(i)] = reward
@@ -827,15 +901,25 @@ class BattlePassStudio(tk.Tk):
         reward_ids = list(rewards.keys())
         free_tiers = {}
         premium_tiers = {}
+        free_tier_pool = list(range(1, tiers_count + 1))
+        premium_tier_pool = list(range(1, tiers_count + 1))
+        free_tier_set = set(random.sample(free_tier_pool, free_tiers_max)) if free_tiers_max < tiers_count else set(free_tier_pool)
+        premium_tier_set = (
+            set(random.sample(premium_tier_pool, premium_tiers_max)) if premium_tiers_max < tiers_count else set(premium_tier_pool)
+        )
         required_points = 0
         for idx in range(1, tiers_count + 1):
             required_points += random.randint(25, 90)
-            free_limit = min(free_reward_limit, len(reward_ids)) if reward_ids else 0
-            prem_limit = min(premium_reward_limit, len(reward_ids)) if reward_ids else 0
-            free_count = random.randint(1, free_limit) if free_limit else 0
-            prem_count = random.randint(1, prem_limit) if prem_limit else 0
-            free_rewards = random.sample(reward_ids, free_count) if free_count else []
-            prem_rewards = random.sample(reward_ids, prem_count) if prem_count else []
+            free_rewards = []
+            prem_rewards = []
+            if idx in free_tier_set:
+                free_limit = min(free_reward_limit, len(reward_ids)) if reward_ids else 0
+                free_count = random.randint(1, free_limit) if free_limit else 0
+                free_rewards = random.sample(reward_ids, free_count) if free_count else []
+            if idx in premium_tier_set:
+                prem_limit = min(premium_reward_limit, len(reward_ids)) if reward_ids else 0
+                prem_count = random.randint(1, prem_limit) if prem_limit else 0
+                prem_rewards = random.sample(reward_ids, prem_count) if prem_count else []
             free_tiers[str(idx)] = {"required-points": required_points, "rewards": free_rewards}
             premium_tiers[str(idx)] = {"required-points": required_points, "rewards": prem_rewards}
 
