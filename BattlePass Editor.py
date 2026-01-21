@@ -408,6 +408,7 @@ class BattlePassStudio(tk.Tk):
         # Required UI state vars (were missing in your current build)
         self.mode_var = tk.StringVar(value="battlepass")
         self.track_var = tk.StringVar(value="free")
+        self.tier_original_id = ""
 
         self.path_free = tk.StringVar(value=self._autodetect_in_dir("free.yml"))
         self.path_premium = tk.StringVar(value=self._autodetect_in_dir("premium.yml"))
@@ -1213,7 +1214,7 @@ class BattlePassStudio(tk.Tk):
         self.tier_required_var = tk.StringVar(value="0")
 
         ttk.Label(form, text="Tier").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        ttk.Entry(form, textvariable=self.tier_id_var, state="readonly").grid(row=0, column=1, sticky="ew")
+        ttk.Entry(form, textvariable=self.tier_id_var).grid(row=0, column=1, sticky="ew")
 
         ttk.Label(form, text="Required points").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(8, 0))
         ttk.Entry(form, textvariable=self.tier_required_var).grid(row=1, column=1, sticky="ew", pady=(8, 0))
@@ -1397,6 +1398,17 @@ class BattlePassStudio(tk.Tk):
         sel = tv.selection()
         return sel[0] if sel else ""
 
+    def _normalize_tier_id(self, raw: str) -> str:
+        tid = str(raw or "").strip()
+        if not tid:
+            return ""
+        if not re.fullmatch(r"\d+", tid):
+            return ""
+        try:
+            return str(int(tid))
+        except Exception:
+            return ""
+
     def _set_text(self, w: tk.Text, s: str):
         w.delete("1.0", "end")
         w.insert("1.0", s or "")
@@ -1445,7 +1457,8 @@ class BattlePassStudio(tk.Tk):
         self._tier_load_editor(str(tid), t)
 
     def _tier_load_editor(self, tid: str, t: dict):
-        self.tier_id_var.set(tid)
+        self.tier_original_id = str(tid)
+        self.tier_id_var.set(str(tid))
         req = t.get("required-points", t.get("required_points", 0))
         self.tier_required_var.set(str(req))
 
@@ -1516,20 +1529,29 @@ class BattlePassStudio(tk.Tk):
     def _tier_clear_editor(self):
         self.tier_id_var.set("")
         self.tier_required_var.set("0")
+        self.tier_original_id = ""
         if hasattr(self, "lb_tier_rewards"):
             self.lb_tier_rewards.delete(0, "end")
         if hasattr(self, "txt_tier_yaml"):
             self._set_text(self.txt_tier_yaml, "")
 
     def _tier_apply(self):
-        tid = self.tier_id_var.get().strip()
+        raw_tid = self.tier_id_var.get()
+        tid = self._normalize_tier_id(raw_tid)
         if not tid:
+            self.set_status("Tier ID must be a number.")
+            return
+        original_tid = self._normalize_tier_id(self.tier_original_id or tid)
+        if not original_tid:
             self.set_status("Select a tier first.")
             return
         tr = self.track_var.get().strip().lower()
         pd = ensure_dict(self.state.get(tr, {}))
         tiers = ensure_dict(pd.get("tiers", {}))
-        t = ensure_dict(tiers.get(tid, {}))
+        if tid != original_tid and tid in tiers:
+            self.set_status(f"Tier ID {tid} already exists in {tr}.")
+            return
+        t = ensure_dict(tiers.get(original_tid, tiers.get(tid, {})))
 
         try:
             req = int(self.tier_required_var.get().strip() or "0")
@@ -1544,6 +1566,8 @@ class BattlePassStudio(tk.Tk):
 
         t["required-points"] = req
         t["rewards"] = rewards
+        if tid != original_tid:
+            tiers.pop(original_tid, None)
         tiers[tid] = t
         pd["tiers"] = tiers
         self.state[tr] = pd
@@ -1551,12 +1575,19 @@ class BattlePassStudio(tk.Tk):
         self.mark_dirty(tr, True)
         self._tiers_refresh_list()
         self._tiers_select(tid)
+        self.tier_original_id = tid
+        self.tier_id_var.set(tid)
         self.set_status(f"Applied changes to {tr} tier {tid}.")
         self._render_preview_battlepass()
 
     def _tier_apply_yaml(self):
-        tid = self.tier_id_var.get().strip()
+        raw_tid = self.tier_id_var.get()
+        tid = self._normalize_tier_id(raw_tid)
         if not tid:
+            self.set_status("Tier ID must be a number.")
+            return
+        original_tid = self._normalize_tier_id(self.tier_original_id or tid)
+        if not original_tid:
             self.set_status("Select a tier first.")
             return
         raw = self._get_text(self.txt_tier_yaml).strip()
@@ -1574,12 +1605,19 @@ class BattlePassStudio(tk.Tk):
         tr = self.track_var.get().strip().lower()
         pd = ensure_dict(self.state.get(tr, {}))
         tiers = ensure_dict(pd.get("tiers", {}))
+        if tid != original_tid and tid in tiers:
+            self.set_status(f"Tier ID {tid} already exists in {tr}.")
+            return
+        if tid != original_tid:
+            tiers.pop(original_tid, None)
         tiers[tid] = data
         pd["tiers"] = tiers
         self.state[tr] = pd
         self.mark_dirty(tr, True)
         self._tiers_refresh_list()
         self._tiers_select(tid)
+        self.tier_original_id = tid
+        self.tier_id_var.set(tid)
         self.set_status(f"Applied YAML to {tr} tier {tid}.")
         self._render_preview_battlepass()
 
